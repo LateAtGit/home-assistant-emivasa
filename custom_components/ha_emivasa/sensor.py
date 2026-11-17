@@ -1,10 +1,35 @@
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 DOMAIN = "ha_emivasa"
+
+SENSOR_TYPES: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(
+        key="latest_reading",
+        name="Water Meter Reading",
+        icon="mdi:counter",
+        native_unit_of_measurement="m³",
+        device_class=SensorDeviceClass.WATER,
+        state_class=SensorStateClass.TOTAL_INCREASING,  # Cumulative meter reading increases over time
+    ),
+    SensorEntityDescription(
+        key="last_consumption",
+        name="Daily Water Consumption",
+        icon="mdi:water",
+        native_unit_of_measurement="m³",
+        device_class=SensorDeviceClass.WATER,
+        state_class=SensorStateClass.TOTAL,  # Or MEASUREMENT for discrete daily consumption blocks
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -15,19 +40,22 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities = [
-        EmivasaLatestReadingSensor(coordinator, entry),
-        EmivasaLastConsumptionSensor(coordinator, entry),
+        EmivasaSensor(coordinator, entry, description)
+        for description in SENSOR_TYPES
     ]
 
     async_add_entities(entities)
 
 
-class EmivasaBaseSensor(CoordinatorEntity, SensorEntity):
-    """Base sensor class for HA Emivasa."""
+class EmivasaSensor(CoordinatorEntity, SensorEntity):
+    """Representation of an Emivasa Sensor."""
 
-    def __init__(self, coordinator, entry) -> None:
+    def __init__(self, coordinator, entry, description: SensorEntityDescription) -> None:
+        """Initialize the sensor."""
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.unique_id}_{self.entity_description.key}"
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.unique_id}_{description.key}"
+        self._attr_name = f"HA Emivasa {description.name}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.unique_id)},
             "name": f"HA Emivasa Water ({entry.data['username']})",
@@ -35,54 +63,23 @@ class EmivasaBaseSensor(CoordinatorEntity, SensorEntity):
             "model": "Smart Water Meter",
         }
 
-
-class EmivasaLatestReadingSensor(EmivasaBaseSensor):
-    """Sensor for the latest meter reading."""
-
-    class entity_description:
-        key = "latest_reading"
-        name = "Water Meter Reading"
-        icon = "mdi:counter"
-        native_unit_of_measurement = "m³"
-
-    def __init__(self, coordinator, entry) -> None:
-        self.entity_description = self.__class__.entity_description
-        super().__init__(coordinator, entry)
-        self._attr_name = "HA Emivasa Water Meter Reading"
-        self._attr_icon = self.entity_description.icon
-        self._attr_native_unit_of_measurement = self.entity_description.native_unit_of_measurement
-
     @property
     def native_value(self):
         """Return the state of the sensor."""
         table = self.coordinator.data.get("table", [])
-        if table:
-            latest = table[-1]
-            return float(latest.get("Lectura", "0").replace(",", "."))
-        return None
+        if not table:
+            return None
 
+        # Get the latest entry in the table list
+        latest = table[-1]
 
-class EmivasaLastConsumptionSensor(EmivasaBaseSensor):
-    """Sensor for the latest daily consumption."""
+        if self.entity_description.key == "latest_reading":
+            val_str = latest.get("Lectura", "0")
+            if val_str:
+                return float(str(val_str).replace(",", "."))
+        elif self.entity_description.key == "last_consumption":
+            val_str = latest.get("Consumo", "0")
+            if val_str:
+                return float(str(val_str).replace(",", "."))
 
-    class entity_description:
-        key = "last_consumption"
-        name = "Daily Water Consumption"
-        icon = "mdi:water"
-        native_unit_of_measurement = "m³"
-
-    def __init__(self, coordinator, entry) -> None:
-        self.entity_description = self.__class__.entity_description
-        super().__init__(coordinator, entry)
-        self._attr_name = "HA Emivasa Daily Water Consumption"
-        self._attr_icon = self.entity_description.icon
-        self._attr_native_unit_of_measurement = self.entity_description.native_unit_of_measurement
-
-    @property
-    def native_value(self):
-        """Return the state of the sensor."""
-        table = self.coordinator.data.get("table", [])
-        if table:
-            latest = table[-1]
-            return float(latest.get("Consumo", "0").replace(",", "."))
         return None

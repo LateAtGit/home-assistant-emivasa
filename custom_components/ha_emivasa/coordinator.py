@@ -26,7 +26,6 @@ class EmivasaApiClient:
         self.password = password
         self.hass = hass
         self.session = requests.Session()
-        # Disable SSL warnings if necessary
         requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
     def authenticate(self) -> bool:
@@ -40,20 +39,24 @@ class EmivasaApiClient:
             "action": "",
         }
         try:
+            _LOGGER.debug("Attempting login to Emivasa for user: %s", self.username)
             response = self.session.post(login_url, data=login_data, verify=False, timeout=15)
             res_json = response.json()
+            _LOGGER.debug("Login response received: %s", res_json)
+
             if not res_json.get("result"):
-                _LOGGER.error("Authentication failed: invalid credentials")
+                _LOGGER.error("Authentication failed: invalid credentials or response")
                 raise EmivasaAuthError("Invalid credentials")
+
             return True
         except requests.exceptions.RequestException as err:
             _LOGGER.error("Connection error during authentication: %s", err)
             raise EmivasaConnectionError("Failed to connect") from err
 
     def fetch_daily_data(self) -> dict:
-        """Fetch daily reading history from today and recent days."""
+        """Fetch daily reading history from recent days."""
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)  # Fetches last 7 days to keep track day-by-day
+        start_date = end_date - timedelta(days=10)  # Fetches last 10 days to ensure table data is populated
 
         start_str = start_date.strftime("%d/%m/%Y")
         end_str = end_date.strftime("%d/%m/%Y")
@@ -72,18 +75,21 @@ class EmivasaApiClient:
         }
 
         try:
+            _LOGGER.debug("Fetching historical data from %s to %s", start_str, end_str)
             response = self.session.post(historial_url, data=historial_data, cookies=cookies, verify=False, timeout=15)
 
             # If session expired, try re-authenticating once
             if response.status_code != 200 or not response.text:
-                _LOGGER.warning("Session might have expired, re-authenticating...")
+                _LOGGER.warning("Session expired or invalid response, re-authenticating...")
                 self.authenticate()
                 cookies["x_SessionId"] = self.session.cookies.get("x_SessionId")
                 cookies["GO01_SessionId"] = self.session.cookies.get("GO01_SessionId")
                 response = self.session.post(historial_url, data=historial_data, cookies=cookies, verify=False,
                                              timeout=15)
 
-            return response.json()
+            data = response.json()
+            _LOGGER.debug("Historical data fetched successfully. Records in table: %s", len(data.get("table", [])))
+            return data
         except Exception as err:
             _LOGGER.error("Error fetching historical data: %s", err)
             raise UpdateFailed(f"Error fetching data: {err}") from err
