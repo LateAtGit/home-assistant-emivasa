@@ -1,0 +1,11 @@
+{
+  "domain": "ha_emivasa",
+  "name": "HA Emivasa Water",
+  "documentation": "https://github.com/username/ha-emivasa",
+  "dependencies": [],
+  "codeowners": [],
+  "requirements": ["requests>=2.28.0"],
+  "config_flow": true,
+  "iot_class": "cloud_polling",
+  "version": "1.0.0"
+}
